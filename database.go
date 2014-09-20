@@ -8,15 +8,13 @@ import "github.com/herenow/go-crate"
 // Database schema
 const (
 	SCHEMA_WEB_INDEX = `Create Table web_index (
+	uri string primary key,
 	domain string,
-	uri string,
 	title string,
 	first_scan timestamp,
 	last_scan timestamp,
 	content string INDEX using fulltext,
-	versions object(dynamic) as (
-		version integer	
-	)
+	version integer
 )`
 )
 
@@ -33,4 +31,3 @@ func PrepareDatabase(con crate.CrateConn) {
 
 	log.Println("Database schema creating response:", res)
 }
-

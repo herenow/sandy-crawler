@@ -31,6 +31,8 @@ func TextProtocolHandler(pageCrawl chan string) {
 			return
 		}
 
+		log.Println("Client connected")
+
 		go TextProtocolClientHandler(conn, pageCrawl)
 	}
 }

@@ -6,9 +6,11 @@ import "github.com/PuerkitoBio/gocrawl"
 import "github.com/PuerkitoBio/goquery"
 import "net/http"
 import "io/ioutil"
+import "time"
+import "encoding/json"
 
 // Database connection holder
-var db crate.CrateConn
+var db, err = crate.Open("http://127.0.0.1:4200/")
 
 // Extend the crawler
 type Ext struct {
@@ -18,8 +20,9 @@ type Ext struct {
 // Function executed once the crawler finishes crawling a page
 func (e *Ext) Visit(ctx *gocrawl.URLContext, res *http.Response, doc *goquery.Document) (interface{}, bool) {
 	url := ctx.URL()
+	url_str := url.String()
 
-	log.Println("Crawled", url, "indexing...")
+	log.Println("Crawled", url_str, "indexing...")
 
 	buf, err := ioutil.ReadAll(res.Body)
 
@@ -30,17 +33,60 @@ func (e *Ext) Visit(ctx *gocrawl.URLContext, res *http.Response, doc *goquery.Do
 
 	body := string(buf)
 
-	log.Println(body)
-
-	json_str, err := db.Query("SELECT content last_scan, title FROM web_index WHERE uri = ?", url)
+	json_str, err := db.Query("SELECT content, last_scan, title FROM web_index WHERE uri = ? LIMIT 1", url_str)
 
 	if err != nil {
 		log.Println(err)
 		return nil, true
 	}
 
-	log.Println(json_str)
+	// TODO, USE THIS HACKY CODE FOR NOW
+	var dat map[string]interface{}
 
+	if err := json.Unmarshal([]byte(json_str), &dat); err != nil {
+        log.Println(err)
+		return nil, true
+    }
+
+	// Check for sql errors
+	if dat["error"] != nil {
+		log.Println("Crate sql backend error")
+		log.Println(dat["error"])
+		return nil, true
+	}
+
+	// Page title
+	title := doc.Find("title").Text()
+
+	// Timestmap
+	timestamp := int32(time.Now().Unix())
+
+	// Version
+	version := 0
+
+	if dat["rowcount"].(float64) == 0.0 {
+		_, err := db.Query("INSERT INTO web_index (uri, domain, title, content, first_scan, last_scan, version) VALUES ($1, $2, $3, $4, $5, $5, $6)",
+					url_str, url.Host, title, body, timestamp, version)
+
+		if err != nil {
+			log.Println("Failed to insert new crawl to db")
+			log.Println(err)
+			return nil, true
+		}
+
+		log.Println("Sucessfull crawl insert")
+	} else {
+		version += 1
+		_, err := db.Query("UPDATE web_index SET title = $1, content = $2, last_scan = $3, version = version + 1 WHERE uri = $4",
+					title, body, timestamp, url_str)
+		if err != nil {
+			log.Println("Failed to update crawl version in db")
+			log.Println(err)
+			return nil, true
+		}
+
+		log.Println("Sucessefull crawl update")
+	}
 
 	return nil, true
 }
@@ -80,6 +126,7 @@ func main() {
 				opts.CrawlDelay = 1
 				opts.LogFlags = gocrawl.LogError
 				opts.SameHostOnly = true
+				opts.MaxVisits = 10000
 				// Crate crawler
 				c := gocrawl.NewCrawlerWithOptions(opts)
 				c.Run(url)
@@ -87,4 +134,3 @@ func main() {
 		}
 	}
 }
-
